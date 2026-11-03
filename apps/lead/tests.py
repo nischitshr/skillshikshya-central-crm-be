@@ -260,3 +260,34 @@ class GlobalCallListTests(APITestCase):
         self.assertEqual(everything.data['count'], 3)
         only = self.client.get(f'/api/calls/?branch_id={dharan.id}')
         self.assertEqual([r['id'] for r in only.data['results']], [dharan_call.id])
+        
+    def test_export_escapes_formula_and_has_header(self):
+        from apps.lead.models import LeadCall
+        from django.utils import timezone as tz
+
+        LeadCall.objects.create(
+            lead=self.lead, call_timestamp=tz.now(), direction='outbound',
+            caller='X', phone_number='9844444444', duration_seconds=10,
+            notes='=1+1', created_by=self.admin, branch=self.branch,
+        )
+        response = self.client.get('/api/calls/export/')
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode('utf-8')
+        self.assertIn('Date & time (NPT)', body)
+        self.assertIn("'=1+1", body)    
+    
+    def test_summary_days_use_nepal_time(self):
+        from datetime import datetime
+        from apps.lead.filters import NPT
+        from apps.lead.models import LeadCall
+
+        # 00:30 NPT on 15 Jan is still 14 Jan in UTC
+        LeadCall.objects.create(
+            lead=self.lead, call_timestamp=datetime(2026, 1, 15, 0, 30, tzinfo=NPT),
+            direction='inbound', caller='X', phone_number='9855555555',
+            duration_seconds=5, created_by=self.admin, branch=self.branch,
+        )
+        response = self.client.get('/api/calls/summary/')
+        days = {d['date']: d['count'] for d in response.data['calls_per_day']}
+        self.assertEqual(days.get('2026-01-15'), 1)
+        self.assertNotIn('2026-01-14', days)    
