@@ -45,7 +45,7 @@ from apps.global_config.filters import BranchFilterBackend
 from django.db.models import Count, Sum, Avg, Q
 from django.db.models.functions import TruncDate
 from apps.lead.filters import NPT
-
+from apps.callminutes.utils import format_duration
 
 class ConfigViewSet(viewsets.ModelViewSet):
     pagination_class = CustomPagination
@@ -281,6 +281,14 @@ class GlobalPaymentViewSet(viewsets.ReadOnlyModelViewSet):
         return [IsAuthenticated(), IsStaffOrHasPermission()]
 
 
+def _safe_cell(value):
+     """Stop formula injection: cells starting with = + - @ become plain text."""
+     s = "" if value is None else str(value)
+     if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+         return "'" + s
+     return s
+ 
+ 
 class GlobalCallViewSet(viewsets.ReadOnlyModelViewSet):
     """Flat, cross-lead call log. Newest calls first by default."""
     queryset = LeadCall.objects.none()
@@ -349,6 +357,36 @@ class GlobalCallViewSet(viewsets.ReadOnlyModelViewSet):
             ],
         })
     
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+            qs = self.filter_queryset(self.get_queryset())
+            today = timezone.now().astimezone(NPT).strftime('%Y-%m-%d')
+
+            response = HttpResponse(content_type='text/csv; charset=utf-8')
+            response['Content-Disposition'] = f'attachment; filename="calls-{today}.csv"'
+            response.write('\ufeff')  # BOM so Excel shows Devanagari correctly
+
+            writer = csv.writer(response)
+            writer.writerow([
+                'Date & time (NPT)', 'Direction', 'Lead', 'Reference', 'Phone', 'Caller',
+                'Logged by', 'Duration (MM:SS)', 'Seconds', 'Outcome', 'Notes', 'Recording',
+            ])
+            for c in qs.iterator(chunk_size=2000):
+                writer.writerow([
+                    c.call_timestamp.astimezone(NPT).strftime('%Y-%m-%d %H:%M:%S'),
+                    c.direction,
+                    _safe_cell(c.lead.full_name),
+                    _safe_cell(c.lead.reference_number),
+                    _safe_cell(c.phone_number),
+                    _safe_cell(c.caller),
+                    _safe_cell(c.created_by.name if c.created_by else ''),
+                    format_duration(c.duration_seconds),
+                    c.duration_seconds,
+                    _safe_cell(c.outcome),
+                    _safe_cell(c.notes),
+                    _safe_cell(c.recording_url),
+                ])
+            return response
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
