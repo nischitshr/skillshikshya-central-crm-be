@@ -242,3 +242,21 @@ class GlobalCallListTests(APITestCase):
         self.assertIn('9833333333', body)
         self.assertNotIn('9811111111', body) 
         self.assertNotIn('9822222222', body)
+        
+        
+    def test_staff_branch_id_filter(self):  # self.client is still logged in as staff admin from setUp
+        from apps.branch.models import Branch
+        from apps.lead.models import LeadCall
+        from django.utils import timezone as tz
+
+        dharan = Branch.objects.create(name='Dharan', code='DHR')
+        dharan_call = LeadCall.objects.create(
+            lead=self.lead, call_timestamp=tz.now(), direction='outbound',
+            caller='X', phone_number='9833333333', duration_seconds=100,
+            created_by=self.admin, branch=dharan,
+        )
+       
+        everything = self.client.get('/api/calls/')
+        self.assertEqual(everything.data['count'], 3)
+        only = self.client.get(f'/api/calls/?branch_id={dharan.id}')
+        self.assertEqual([r['id'] for r in only.data['results']], [dharan_call.id])
