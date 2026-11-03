@@ -42,6 +42,9 @@ from apps.lead.filters import (
 from apps.global_config.pagination import CustomPagination
 from apps.global_config.permissions import IsStaffOrHasPermission
 from apps.global_config.filters import BranchFilterBackend
+from django.db.models import Count, Sum, Avg, Q
+from django.db.models.functions import TruncDate
+from apps.lead.filters import NPT
 
 
 class ConfigViewSet(viewsets.ModelViewSet):
@@ -298,9 +301,54 @@ class GlobalCallViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
     def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
+        if self.action in ['list', 'retrieve', 'summary', 'export']:
             return [IsAuthenticated()]
         return [IsAuthenticated(), IsStaffOrHasPermission()]
+    
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+    # Same filters + branch scoping as the list, so totals match the table.
+    
+        qs = self.filter_queryset(self.get_queryset()).order_by()
+
+        t = qs.aggregate(
+            total=Count('id'),
+            inbound=Count('id', filter=Q(direction='inbound')),
+            outbound=Count('id', filter=Q(direction='outbound')),
+            talk_seconds=Sum('duration_seconds'),
+            avg_seconds=Avg('duration_seconds'),
+            connected=Count('id', filter=Q(duration_seconds__gt=0)),
+        )
+        total = t['total']
+
+        by_day = (
+            qs.annotate(day=TruncDate('call_timestamp', tzinfo=NPT))
+            .values('day')
+            .annotate(count=Count('id'))
+            .order_by('day')
+        )
+        top_callers = (
+            qs.values('created_by', 'created_by__name')
+            .annotate(count=Count('id'))
+            .order_by('-count', 'created_by__name')[:10]
+        )
+
+        return Response({
+            'total_calls': total,
+            'inbound': t['inbound'],
+            'outbound': t['outbound'],
+            'talk_seconds': t['talk_seconds'] or 0,
+            'avg_seconds': round(t['avg_seconds'] or 0),
+            'connect_rate': round(t['connected'] / total * 100, 1) if total else 0,
+            'calls_per_day': [
+                {'date': d['day'].isoformat(), 'count': d['count']} for d in by_day
+            ],
+            'top_callers': [
+                {'user_id': c['created_by'], 'name': c['created_by__name'], 'count': c['count']}
+                for c in top_callers
+            ],
+        })
+    
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
