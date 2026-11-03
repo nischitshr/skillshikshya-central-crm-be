@@ -290,4 +290,26 @@ class GlobalCallListTests(APITestCase):
         response = self.client.get('/api/calls/summary/')
         days = {d['date']: d['count'] for d in response.data['calls_per_day']}
         self.assertEqual(days.get('2026-01-15'), 1)
-        self.assertNotIn('2026-01-14', days)    
+        self.assertNotIn('2026-01-14', days)   
+        
+    def test_query_count_is_fixed(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from django.utils import timezone as tz
+        from apps.lead.models import LeadCall
+
+        def queries(url):
+            with CaptureQueriesContext(connection) as ctx:
+                self.client.get(url)
+            return len(ctx)
+
+        urls = ('/api/calls/', '/api/calls/summary/', '/api/calls/export/')
+        before = [queries(u) for u in urls]
+        for i in range(30):
+            LeadCall.objects.create(
+                lead=self.lead, call_timestamp=tz.now(), direction='outbound',
+                caller='X', phone_number=f'98000000{i:02d}', duration_seconds=i,
+                created_by=self.counselor, branch=self.branch,
+            )
+        after = [queries(u) for u in urls]
+        self.assertEqual(before, after) 
