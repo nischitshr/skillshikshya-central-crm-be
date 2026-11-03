@@ -146,6 +146,14 @@ class GlobalCallListTests(APITestCase):
             phone_number='9822222222', duration_seconds=60,
             created_by=self.admin, branch=self.branch,
         )
+    def test_summary_total_matches_list(self):
+        summary = self.client.get('/api/calls/summary/')
+        listing = self.client.get('/api/calls/')
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.data['total_calls'], listing.data['count'])
+        self.assertEqual(summary.data['inbound'], 1)
+        self.assertEqual(summary.data['outbound'], 1)
+        self.assertEqual(summary.data['talk_seconds'], 330)
 
     def test_list_returns_all_calls_newest_first(self):
         response = self.client.get('/api/calls/')
@@ -196,3 +204,12 @@ class GlobalCallListTests(APITestCase):
         self.client.force_authenticate(other_admin)
         response = self.client.get('/api/calls/')
         self.assertNotIn(self.recent_call.id, [r['id'] for r in response.data['results']])
+
+    def test_summary_total_matches_list(self):
+            summary = self.client.get('/api/calls/summary/')
+            listing = self.client.get('/api/calls/')
+            self.assertEqual(summary.status_code, 200)
+            self.assertEqual(summary.data['total_calls'], listing.data['count'])
+            self.assertEqual(summary.data['inbound'], 1)
+            self.assertEqual(summary.data['outbound'], 1)
+            self.assertEqual(summary.data['talk_seconds'], 330)
