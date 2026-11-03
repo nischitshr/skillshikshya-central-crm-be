@@ -213,3 +213,32 @@ class GlobalCallListTests(APITestCase):
             self.assertEqual(summary.data['inbound'], 1)
             self.assertEqual(summary.data['outbound'], 1)
             self.assertEqual(summary.data['talk_seconds'], 330)
+            
+    def test_branch_scoping_list_summary_export(self):
+        from apps.branch.models import Branch
+        from apps.lead.models import LeadCall
+        from django.utils import timezone as tz
+
+        dharan = Branch.objects.create(name='Dharan', code='DHR')
+        dharan_user = User.objects.create_user(
+            email='dhr@test.com', name='Dharan User', password='x', branch=dharan,
+        )
+        dharan_call = LeadCall.objects.create(
+            lead=self.lead, call_timestamp=tz.now(), direction='outbound',
+            caller='Dharan User', phone_number='9833333333',
+            duration_seconds=100, created_by=dharan_user, branch=dharan,
+        )
+        self.client.force_authenticate(dharan_user)
+
+        listing = self.client.get('/api/calls/')
+        self.assertEqual([r['id'] for r in listing.data['results']], [dharan_call.id])
+
+        summary = self.client.get('/api/calls/summary/')
+        self.assertEqual(summary.data['total_calls'], 1)
+        self.assertEqual(summary.data['talk_seconds'], 100)
+
+        export = self.client.get('/api/calls/export/')
+        body = export.content.decode('utf-8')
+        self.assertIn('9833333333', body)
+        self.assertNotIn('9811111111', body) 
+        self.assertNotIn('9822222222', body)
